@@ -176,6 +176,14 @@ export function useQueue(options: UseQueueOptions = {}): UseQueueReturn {
     return Boolean(payload);
   }, [callQueueApi]);
 
+  const promoteToTop = useCallback(async (id: string) => {
+    const payload = await callQueueApi('PUT', {
+      action: 'promote_top',
+      id,
+    });
+    return Boolean(payload);
+  }, [callQueueApi]);
+
   /**
    * Advance to the next speaker in the queue
    * Moves first speaker to currentSpeaker with allocated time
@@ -231,6 +239,7 @@ export function useQueue(options: UseQueueOptions = {}): UseQueueReturn {
     removeSpeaker,
     reorderQueue,
     moveToBottom,
+    promoteToTop,
     nextSpeaker,
     clearQueue,
     endCurrentSpeaker,

@@ -163,7 +163,9 @@ export const QueueList = memo(function QueueList({
   currentSpeaker,
   onAddSpeaker,
   onRemoveSpeaker,
-  onReorderQueue,
+  onReorderQueue: _onReorderQueue,
+  onMoveToBottom,
+  onPromoteToTop,
   onSelectNext,
   isInQueue,
   defaultTime,
@@ -232,8 +234,8 @@ export const QueueList = memo(function QueueList({
                 onRemove={async (id) => {
                   await withActionGuard(() => onRemoveSpeaker(id), 'Unable to remove');
                 }}
-                onMoveUp={() => void withActionGuard(() => onReorderQueue(index, index - 1), 'Unable to reorder')}
-                onMoveDown={() => void withActionGuard(() => onReorderQueue(index, index + 1), 'Unable to reorder')}
+                onMoveUp={() => void withActionGuard(() => onPromoteToTop(speaker.id), 'Unable to promote')}
+                onMoveDown={() => void withActionGuard(() => onMoveToBottom(speaker.id), 'Unable to move')}
               />
             ))}
           </div>

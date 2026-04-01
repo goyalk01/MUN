@@ -1,197 +1,123 @@
-/**
- * MUN Command Center - Yield API Route
- * Handles yield protocol operations following MUN rules of procedure
- * 
- * Yield Types:
- * - Chair: Speaker yields remaining time back to the chair
- * - Delegate: Speaker yields remaining time to another delegate
- * - Questions: Speaker yields remaining time for Q&A
- * 
- * Endpoints:
- * POST /api/yield - Execute a yield action
- * GET  /api/yield - Get current yield status
- * DELETE /api/yield - Clear current yield
- * PUT /api/yield - Update yield (accept/decline/complete)
- * 
- * NOTE: This API uses shared state with queue API for speaker lookup
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { 
-  YieldType, 
-  YieldAction, 
-  YieldRequest,
-  YieldResponse,
-  Speaker
-} from '@/lib/types';
+import { YieldAction, YieldRequest, YieldResponse, YieldType } from '@/lib/types';
+import { getSessionSnapshot, getYield, setYield } from '@/lib/serverStore';
 
-// In-memory state; replace with persistence layer in production.
-let currentYield: YieldAction | null = null;
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const VALID_YIELD_TYPES: readonly YieldType[] = ['chair', 'delegate', 'questions'] as const;
 const VALID_UPDATE_ACTIONS = ['accept', 'decline', 'complete'] as const;
 
-// Helper to create consistent error response
-function errorResponse(message: string, status: number): NextResponse<YieldResponse> {
-  return NextResponse.json({
-    success: false,
-    data: null,
-    error: message,
-  }, { status });
-}
-
-// Helper to create consistent success response
-function successResponse(data?: YieldAction): NextResponse<YieldResponse> {
+function successResponse(data: YieldAction | null = null): NextResponse<YieldResponse> {
   return NextResponse.json({
     success: true,
-    data: data ?? null,
+    data,
     error: null,
-  });
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
-/**
- * GET /api/yield - Get current yield status
- */
+function errorResponse(message: string, status: number): NextResponse<YieldResponse> {
+  return NextResponse.json(
+    {
+      success: false,
+      data: null,
+      error: message,
+    },
+    { status, headers: { 'Cache-Control': 'no-store' } }
+  );
+}
+
 export async function GET(): Promise<NextResponse<YieldResponse>> {
-  return successResponse(currentYield ?? undefined);
+  return successResponse(getYield());
 }
 
-/**
- * POST /api/yield - Execute a yield action
- * Body: { type: YieldType, fromSpeakerId: string, toDelegateId?: string, remainingTime: number }
- */
 export async function POST(request: NextRequest): Promise<NextResponse<YieldResponse>> {
   try {
-    const body = await request.json() as YieldRequest;
-    const { type, fromSpeakerId, toDelegateId, remainingTime } = body;
+    const body = (await request.json()) as YieldRequest;
 
-    // Validate yield type
-    if (!type || !VALID_YIELD_TYPES.includes(type)) {
-      return errorResponse(
-        'Invalid yield type. Must be "chair", "delegate", or "questions".',
-        400
-      );
+    if (!VALID_YIELD_TYPES.includes(body.type)) {
+      return errorResponse('Invalid yield type. Must be "chair", "delegate", or "questions".', 400);
     }
 
-    // Validate from speaker ID
-    if (!fromSpeakerId || typeof fromSpeakerId !== 'string') {
-      return errorResponse('From speaker ID is required and must be a string.', 400);
+    if (!body.fromSpeakerId || typeof body.fromSpeakerId !== 'string') {
+      return errorResponse('fromSpeakerId is required.', 400);
     }
 
-    // Validate remaining time (0-600 seconds)
-    if (typeof remainingTime !== 'number' || remainingTime < 0 || remainingTime > 600) {
-      return errorResponse(
-        'Valid remaining time is required (0-600 seconds).',
-        400
-      );
+    if (typeof body.remainingTime !== 'number' || body.remainingTime < 0 || body.remainingTime > 600) {
+      return errorResponse('remainingTime must be between 0 and 600.', 400);
     }
 
-    // For delegate yield, validate target delegate
-    if (type === 'delegate') {
-      if (!toDelegateId || typeof toDelegateId !== 'string') {
-        return errorResponse(
-          'Target delegate ID is required for delegate yield.',
-          400
-        );
+    const snapshot = getSessionSnapshot();
+    const fromSpeaker = snapshot.currentSpeaker;
+
+    if (!fromSpeaker || fromSpeaker.id !== body.fromSpeakerId) {
+      return errorResponse('No active speaker matching fromSpeakerId.', 400);
+    }
+
+    let toDelegate = undefined;
+    if (body.type === 'delegate') {
+      if (!body.toDelegateId || typeof body.toDelegateId !== 'string') {
+        return errorResponse('toDelegateId is required for delegate yield.', 400);
       }
-    }
 
-    // Create speaker reference (client provides full data)
-    // In production, this would fetch from database
-    const fromSpeaker: Speaker = {
-      id: fromSpeakerId,
-      name: 'Speaker', // Will be enriched by client
-      country: 'Country', // Will be enriched by client
-      createdAt: Date.now(),
-      addedAt: Date.now(),
-      position: 0,
-    };
+      const target = snapshot.queue.find((speaker) => speaker.id === body.toDelegateId);
+      if (!target) {
+        return errorResponse('Invalid yield target delegate.', 400);
+      }
 
-    // Build yield action
-    const yieldAction: YieldAction = {
-      type,
-      fromSpeaker,
-      remainingTime,
-      timestamp: Date.now(),
-    };
-
-    // Add target delegate for delegate yield
-    if (type === 'delegate' && toDelegateId) {
-      yieldAction.toDelegate = {
-        id: toDelegateId,
-        name: 'Target Delegate', // Will be enriched by client
-        country: 'Target Country', // Will be enriched by client
-        createdAt: Date.now(),
+      toDelegate = {
+        id: target.id,
+        name: target.name,
+        country: target.country,
+        createdAt: target.createdAt,
       };
     }
 
-    // Store current yield (atomic operation)
-    currentYield = yieldAction;
+    const action: YieldAction = {
+      type: body.type,
+      fromSpeaker,
+      toDelegate,
+      remainingTime: body.remainingTime,
+      timestamp: Date.now(),
+    };
 
-    return NextResponse.json({
-      success: true,
-      data: yieldAction,
-      error: null,
-    });
-
-  } catch (error) {
-    console.error('Yield POST error:', error);
-    return errorResponse('Failed to process yield action.', 500);
+    setYield(action);
+    return successResponse(action);
+  } catch {
+    return errorResponse('Invalid request body.', 400);
   }
 }
 
-/**
- * DELETE /api/yield - Clear current yield
- */
 export async function DELETE(): Promise<NextResponse<YieldResponse>> {
-  currentYield = null;
-  return successResponse();
+  setYield(null);
+  return successResponse(null);
 }
 
-/**
- * PUT /api/yield - Update yield (e.g., when delegate accepts yield)
- * Body: { action: 'accept' | 'decline' | 'complete' }
- */
 export async function PUT(request: NextRequest): Promise<NextResponse<YieldResponse>> {
   try {
-    const body = await request.json();
-    const { action } = body;
+    const body = (await request.json()) as { action?: 'accept' | 'decline' | 'complete' };
 
-    if (!currentYield) {
+    if (!body.action || !VALID_UPDATE_ACTIONS.includes(body.action)) {
+      return errorResponse('Invalid action. Use "accept", "decline", or "complete".', 400);
+    }
+
+    const current = getYield();
+    if (!current) {
       return errorResponse('No active yield to update.', 400);
     }
 
-    // Validate action
-    if (!action || !VALID_UPDATE_ACTIONS.includes(action)) {
-      return errorResponse(
-        'Invalid action. Use "accept", "decline", or "complete".',
-        400
-      );
+    if (body.action === 'accept') {
+      return successResponse(current);
     }
 
-    switch (action) {
-      case 'accept':
-        // Yield accepted - keep the yield active
-        return successResponse(currentYield);
-
-      case 'decline':
-        // Yield declined - clear the yield
-        currentYield = null;
-        return successResponse();
-
-      case 'complete': {
-        // Yield completed - clear the yield and return it
-        const completedYield = currentYield;
-        currentYield = null;
-        return successResponse(completedYield);
-      }
-
-      default:
-        return errorResponse('Invalid action.', 400);
+    if (body.action === 'decline') {
+      setYield(null);
+      return successResponse(null);
     }
 
-  } catch (error) {
-    console.error('Yield PUT error:', error);
-    return errorResponse('Failed to update yield.', 500);
+    setYield(null);
+    return successResponse(current);
+  } catch {
+    return errorResponse('Invalid request body.', 400);
   }
 }

@@ -41,6 +41,10 @@ export default function DashboardPage() {
     yieldToDelegate,
     yieldToQuestions,
     clearLogs,
+    removeLog,
+    resetSession,
+    lastSyncedAt,
+    isSyncing,
     startSession,
     endSession,
   } = session;
@@ -52,6 +56,17 @@ export default function DashboardPage() {
   const handleToggleAutoNext = useCallback(() => {
     setAutoNext(!autoNext);
   }, [autoNext, setAutoNext]);
+
+  const handleResetSession = useCallback(() => {
+    void resetSession();
+  }, [resetSession]);
+
+  const syncLabel = useMemo(() => {
+    if (isSyncing) return 'Syncing...';
+    if (!lastSyncedAt) return 'Not synced yet';
+    const ageSeconds = Math.max(0, Math.floor((Date.now() - lastSyncedAt) / 1000));
+    return `Synced ${ageSeconds}s ago`;
+  }, [isSyncing, lastSyncedAt]);
 
   // Toggle timer start/pause
   const handleToggleTimer = useCallback(() => {
@@ -136,6 +151,11 @@ export default function DashboardPage() {
                 </span>
               </div>
 
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)]">
+                <span className={`status-dot ${isSyncing ? 'status-dot-warning' : 'status-dot-active'}`} />
+                <span className="text-xs text-[var(--text-secondary)]">{syncLabel}</span>
+              </div>
+
               {/* Session Toggle */}
               {!isActive ? (
                 <button onClick={startSession} className="btn btn-success px-4 py-2">
@@ -152,6 +172,10 @@ export default function DashboardPage() {
                   End
                 </button>
               )}
+
+              <button onClick={handleResetSession} className="btn btn-secondary px-3 py-2" title="Reset queue, logs, and yield state">
+                Reset
+              </button>
 
               <ThemeToggle />
             </div>
@@ -171,6 +195,8 @@ export default function DashboardPage() {
                 onAddSpeaker={queue.addSpeaker}
                 onRemoveSpeaker={queue.removeSpeaker}
                 onReorderQueue={queue.reorderQueue}
+                onMoveToBottom={queue.moveToBottom}
+                onPromoteToTop={queue.promoteToTop}
                 onSelectNext={queue.nextSpeaker}
                 isInQueue={queue.isInQueue}
                 defaultTime={TIMER_PRESETS.STANDARD}
@@ -305,6 +331,7 @@ export default function DashboardPage() {
               <ActivityLogComponent
                 logs={logs}
                 onClear={clearLogs}
+                onRemoveLog={removeLog}
                 maxVisible={50}
               />
             </div>

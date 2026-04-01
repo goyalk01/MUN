@@ -1,55 +1,46 @@
-/**
- * MUN Command Center - Session API Route
- * Provides and updates an in-memory session snapshot.
- */
-
 import { NextRequest, NextResponse } from 'next/server';
-import { SessionState, SessionMode, TIMER_PRESETS } from '@/lib/types';
+import { SessionMode } from '@/lib/types';
+import { getSessionSnapshot, setMode } from '@/lib/serverStore';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 interface SessionResponse {
   success: boolean;
-  data: SessionState | null;
+  data: {
+    queue: ReturnType<typeof getSessionSnapshot>['queue'];
+    currentSpeaker: ReturnType<typeof getSessionSnapshot>['currentSpeaker'];
+    logs: ReturnType<typeof getSessionSnapshot>['logs'];
+    mode: ReturnType<typeof getSessionSnapshot>['mode'];
+    currentYield: ReturnType<typeof getSessionSnapshot>['currentYield'];
+    sessionId: string;
+    startedAt: number;
+    stats: ReturnType<typeof getSessionSnapshot>['stats'];
+    updatedAt: number;
+  } | null;
   error: string | null;
 }
 
-const initialSessionState: SessionState = {
-  mode: 'idle',
-  queue: {
-    speakers: [],
-    currentSpeaker: null,
-  },
-  timer: {
-    time: TIMER_PRESETS.STANDARD,
-    initialTime: TIMER_PRESETS.STANDARD,
-    isRunning: false,
-    isPaused: false,
-  },
-  currentYield: null,
-  logs: [],
-  sessionId: 'session_api_snapshot',
-  startedAt: 0,
-  stats: {
-    totalSpeakers: 0,
-    currentSpeakerIndex: 0,
-    averageSpeakingTime: 0,
-    totalSpeakingTime: 0,
-    speechCount: 0,
-    yieldCount: {
-      chair: 0,
-      delegate: 0,
-      questions: 0,
+function successResponse(): NextResponse<SessionResponse> {
+  const snapshot = getSessionSnapshot();
+  return NextResponse.json(
+    {
+      success: true,
+      data: {
+        queue: snapshot.queue,
+        currentSpeaker: snapshot.currentSpeaker,
+        logs: snapshot.logs,
+        mode: snapshot.mode,
+        currentYield: snapshot.currentYield,
+        sessionId: snapshot.sessionId,
+        startedAt: snapshot.startedAt,
+        stats: snapshot.stats,
+        updatedAt: Date.now(),
+      },
+      error: null,
     },
-  },
-};
-
-let sessionState: SessionState = initialSessionState;
-
-function successResponse(data: SessionState): NextResponse<SessionResponse> {
-  return NextResponse.json({
-    success: true,
-    data,
-    error: null,
-  });
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 }
 
 function errorResponse(message: string, status: number): NextResponse<SessionResponse> {
@@ -59,7 +50,7 @@ function errorResponse(message: string, status: number): NextResponse<SessionRes
       data: null,
       error: message,
     },
-    { status }
+    { status, headers: { 'Cache-Control': 'no-store' } }
   );
 }
 
@@ -67,75 +58,23 @@ function isValidMode(mode: unknown): mode is SessionMode {
   return mode === 'idle' || mode === 'speech' || mode === 'qa';
 }
 
-/**
- * GET /api/session - Return full in-memory session snapshot.
- */
 export async function GET(): Promise<NextResponse<SessionResponse>> {
-  return successResponse(sessionState);
+  return successResponse();
 }
 
-/**
- * PUT /api/session - Partially update session configuration.
- * Supported fields: mode, timer.initialTime/time/isRunning/isPaused.
- */
 export async function PUT(request: NextRequest): Promise<NextResponse<SessionResponse>> {
   try {
-    const body = (await request.json()) as Partial<SessionState>;
+    const body = (await request.json()) as { mode?: SessionMode };
 
-    const nextState: SessionState = {
-      ...sessionState,
-      ...body,
-      queue: body.queue
-        ? {
-            speakers: Array.isArray(body.queue.speakers) ? body.queue.speakers : sessionState.queue.speakers,
-            currentSpeaker: body.queue.currentSpeaker ?? sessionState.queue.currentSpeaker,
-          }
-        : sessionState.queue,
-      timer: body.timer
-        ? {
-            time: typeof body.timer.time === 'number' ? body.timer.time : sessionState.timer.time,
-            initialTime:
-              typeof body.timer.initialTime === 'number'
-                ? body.timer.initialTime
-                : sessionState.timer.initialTime,
-            isRunning:
-              typeof body.timer.isRunning === 'boolean'
-                ? body.timer.isRunning
-                : sessionState.timer.isRunning,
-            isPaused:
-              typeof body.timer.isPaused === 'boolean'
-                ? body.timer.isPaused
-                : sessionState.timer.isPaused,
-          }
-        : sessionState.timer,
-      logs: Array.isArray(body.logs) ? body.logs : sessionState.logs,
-      stats: body.stats
-        ? {
-            ...sessionState.stats,
-            ...body.stats,
-            yieldCount: {
-              ...sessionState.stats.yieldCount,
-              ...(body.stats.yieldCount ?? {}),
-            },
-          }
-        : sessionState.stats,
-    };
-
-    if (body.mode !== undefined && !isValidMode(body.mode)) {
-      return errorResponse('Invalid mode. Use "idle", "speech", or "qa".', 400);
+    if (body.mode !== undefined) {
+      if (!isValidMode(body.mode)) {
+        return errorResponse('Invalid mode. Use "idle", "speech", or "qa".', 400);
+      }
+      setMode(body.mode);
     }
 
-    if (nextState.timer.time < 0 || nextState.timer.time > 600) {
-      return errorResponse('Invalid timer.time. Must be 0-600 seconds.', 400);
-    }
-
-    if (nextState.timer.initialTime <= 0 || nextState.timer.initialTime > 600) {
-      return errorResponse('Invalid timer.initialTime. Must be 1-600 seconds.', 400);
-    }
-
-    sessionState = nextState;
-    return successResponse(sessionState);
+    return successResponse();
   } catch {
-    return errorResponse('Failed to parse or apply session update.', 400);
+    return errorResponse('Invalid request body.', 400);
   }
 }

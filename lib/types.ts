@@ -250,6 +250,7 @@ export interface UseQueueReturn {
   removeSpeaker: (id: string) => Promise<boolean>;
   reorderQueue: (fromIndex: number, toIndex: number) => Promise<boolean>;
   moveToBottom: (id: string) => Promise<boolean>;
+  promoteToTop: (id: string) => Promise<boolean>;
   nextSpeaker: (allocatedTime: number) => Promise<boolean>;
   clearQueue: () => Promise<boolean>;
   endCurrentSpeaker: () => Promise<boolean>;
@@ -306,11 +307,14 @@ export interface UseSessionReturn {
   logs: ActivityLog[];
   addLog: (type: LogType, message: string, metadata?: Record<string, unknown>) => void;
   clearLogs: () => Promise<void>;
+  removeLog: (logId: string) => Promise<void>;
   
   // Session control
   startSession: () => void;
   endSession: () => Promise<void>;
+  resetSession: () => Promise<void>;
   setMode: (mode: SessionMode) => void;
+  fetchSession: () => Promise<void>;
   
   // Session statistics
   stats: SessionStats;
@@ -318,6 +322,11 @@ export interface UseSessionReturn {
   // Auto-next feature
   autoNext: boolean;
   setAutoNext: (enabled: boolean) => void;
+
+  // Sync state
+  isSyncing: boolean;
+  lastSyncedAt: number | null;
+  syncError: string | null;
 }
 
 // ============================================
@@ -363,6 +372,8 @@ export interface QueueListProps {
   onAddSpeaker: (delegate: Omit<Delegate, 'id' | 'createdAt'>) => Promise<boolean>;
   onRemoveSpeaker: (id: string) => Promise<boolean>;
   onReorderQueue: (fromIndex: number, toIndex: number) => Promise<boolean>;
+  onMoveToBottom: (id: string) => Promise<boolean>;
+  onPromoteToTop: (id: string) => Promise<boolean>;
   onSelectNext: (allocatedTime: number) => Promise<boolean>;
   isInQueue: (country: string) => boolean;
   defaultTime: number;
@@ -373,6 +384,7 @@ export interface QueueListProps {
 export interface ActivityLogProps {
   logs: ActivityLog[];
   onClear: () => Promise<void>;
+  onRemoveLog?: (logId: string) => Promise<void>;
   maxVisible?: number;
 }
 

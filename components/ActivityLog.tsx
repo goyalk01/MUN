@@ -30,9 +30,16 @@ function getLogDotClass(type: LogType): string {
 
 interface LogEntryProps {
   log: ActivityLogType;
+  onRemoveLog?: (logId: string) => Promise<void>;
 }
 
-const LogEntry = memo(function LogEntry({ log }: LogEntryProps) {
+const LogEntry = memo(function LogEntry({ log, onRemoveLog }: LogEntryProps) {
+  const handleRemove = useCallback(() => {
+    if (onRemoveLog) {
+      void onRemoveLog(log.id);
+    }
+  }, [onRemoveLog, log.id]);
+
   return (
     <div className="flex items-start gap-3 py-2 px-3 hover:bg-[var(--bg-primary)] rounded-lg transition-colors animate-slide-in">
       {/* Dot indicator */}
@@ -47,6 +54,15 @@ const LogEntry = memo(function LogEntry({ log }: LogEntryProps) {
           <span className="text-xs font-mono text-[var(--text-tertiary)]">{formatTimestamp(log.timestamp)}</span>
         </div>
       </div>
+      {onRemoveLog && (
+        <button
+          onClick={handleRemove}
+          className="text-xs text-[var(--text-tertiary)] hover:text-red-500 transition-colors"
+          title="Remove log"
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 });
@@ -54,6 +70,7 @@ const LogEntry = memo(function LogEntry({ log }: LogEntryProps) {
 export const ActivityLogComponent = memo(function ActivityLog({
   logs,
   onClear,
+  onRemoveLog,
   maxVisible = 50,
 }: ActivityLogProps) {
   const [activeFilter, setActiveFilter] = useState<LogType[]>([]);
@@ -138,7 +155,7 @@ export const ActivityLogComponent = memo(function ActivityLog({
         {filteredLogs.length > 0 ? (
           <div className="space-y-0.5">
             {filteredLogs.map(log => (
-              <LogEntry key={log.id} log={log} />
+              <LogEntry key={log.id} log={log} onRemoveLog={onRemoveLog} />
             ))}
             
             {!isExpanded && hiddenCount > 0 && (
